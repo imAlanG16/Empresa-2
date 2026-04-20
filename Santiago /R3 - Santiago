@@ -240,3 +240,31 @@ switchport port-security mac-address sticky
 switchport port-security violation restrict
 spanning-tree portfast
 spanning-tree bpduguard enable
+
+
+1. Configuración de los Servidores
+Para asegurar la estabilidad, realicé la instalación y configuración manual de cada servicio:
+
+Servidor DNS (BIND9): Implementé el servidor de nombres para el dominio empresa2.com.do. Creé los archivos de zona directa e inversa, asegurándome de que todos los nodos de la red pudieran resolver correctamente los nombres de los servidores (ej. mail.empresa2.com.do).
+
+Servidor Web (Apache2): Configuré el servidor web donde alojé la página corporativa de la empresa. Personalicé el index.html con la marca de la compañía (Altek) y ajusté los Virtual Hosts para que el servidor respondiera correctamente a las peticiones HTTP.
+
+Servidor de Correo (Postfix & Dovecot + Roundcube): Esta fue la parte más compleja. Configuré Postfix para el envío de correos (MTA) y Dovecot para la recepción (IMAP/POP3). Para facilitar la experiencia de usuario, instalé y configuré Roundcube como cliente webmail, permitiendo que usuarios como jose y alan pudieran comunicarse mediante una interfaz gráfica.
+
+2. Portabilidad e Intercambio de Datos
+Uno de los retos mayores fue cómo pasar mi trabajo a mis compañeros de equipo. Para ello:
+
+Utilicé WinSCP para navegar por las carpetas temporales de PNETLab (/opt/unetlab/tmp/).
+
+Extraje los discos virtuales de los nodos en formato .qcow2, lo que permitió que mis compañeros pudieran "inyectar" mi configuración directamente en sus propios laboratorios sin tener que repetir todo el proceso de instalación.
+
+3. Resolución de Problemas (Troubleshooting)
+Durante el proceso, enfrenté y solucioné varios inconvenientes técnicos:
+
+Estabilidad en la subida: Debido al gran peso de los archivos configurados (más de 7GB), tuve que ajustar la configuración de energía de mi laptop para evitar que se suspendiera y así garantizar que la subida a Google Drive fuera exitosa durante la madrugada.
+
+Nodos que no arrancaban: Descubrí que, al mover archivos manualmente en PNETLab, el sistema pierde el rastro de los permisos. Lo solucioné identificando la necesidad de aplicar el comando de Fix Permissions y realizar un Wipe a los nodos antes de encenderlos.
+
+Sincronización de imágenes: Me di cuenta de que los cambios no siempre se guardaban permanentemente en la imagen base. Para solucionar esto, apliqué el proceso de Node Commit, fusionando mis configuraciones con la imagen maestra de Ubuntu para asegurar que los servidores estuvieran "listos para usar" desde el primer encendido.
+
+Errores de conexión web: Ante fallos de conexión al dominio de correo, realicé un diagnóstico de servicios (systemctl status), verifiqué la resolución de nombres con nslookup y revisé los archivos de configuración en /etc/apache2/sites-available/ para asegurar que el ServerName coincidiera con el dominio.
