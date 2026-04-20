@@ -1,1 +1,421 @@
 
+1. Router R5 - Barahona
+
+enable
+configure terminal
+hostname R5-BARAHONA
+no ip domain-lookup
+ip domain-name empresa2.com.do
+service password-encryption
+enable secret cisco123
+
+username admin privilege 15 secret Admin123
+
+crypto key generate rsa modulus 1024
+ip ssh version 2
+
+line console 0
+logging synchronous
+password cisco
+login
+exit
+
+line vty 0 4
+transport input ssh
+login local
+exit
+
+R5-SWA1 = switch superior
+R5-SWA2 = switch inferior
+
+!
+! WAN
+!
+interface e0/0
+description ENLACE-WAN-PENDIENTE
+ip addr dhcp
+ip nat outside
+no shutdown
+
+!
+! TRUNK HACIA SWITCH SUPERIOR
+!
+interface e0/1
+no shutdown
+description TRUNK-HACIA-R5-SWA1
+
+interface e0/1.10
+encapsulation dot1Q 10
+description VLAN10-DEPTO1
+ip address 172.24.0.1 255.255.255.248
+ip nat inside
+
+interface e0/1.20
+encapsulation dot1Q 20
+description VLAN20-DEPTO2
+ip address 172.24.0.9 255.255.255.248
+ip nat inside
+
+interface e0/1.30
+encapsulation dot1Q 30
+description VLAN30-DEPTO3
+ip address 172.24.0.17 255.255.255.248
+ip nat inside
+
+interface e0/1.99
+encapsulation dot1Q 99
+description VLAN99-GESTION
+ip address 172.24.0.25 255.255.255.248
+ip nat inside
+
+access-list 1 permit 172.24.0.0 0.1.255.255
+ip nat inside source list 1 interface Ethernet0/0 overload
+
+! 1. Fase 1: ISAKMP (IKEv1)
+crypto isakmp policy 10
+encr aes
+authentication pre-share
+group 2
+exit
+
+crypto isakmp key itla2026 address 17.6.0.2
+
+! 2. Fase 2: IPsec Transform-set y Profile
+crypto ipsec transform-set ESP-AES-SHA esp-aes esp-sha-hmac
+mode transport
+exit
+
+crypto ipsec profile VPN-PROFILE
+set transform-set ESP-AES-SHA
+exit
+
+! 3. Interfaz Física - Asegurando el Full Duplex
+interface e0/0
+duplex full
+exit
+
+! 4. Interfaz Túnel - Punta Cana
+interface Tunnel0
+ip address 10.0.0.5 255.255.255.0
+
+! NHRP: Registro contra el Hub (Santo Domingo)
+ip nhrp authentication itla
+ip nhrp network-id 2
+
+! Mapeos hacia la IP pública del Hub (e0/2 = 17.6.0.2)
+ip nhrp map multicast 17.6.0.2
+ip nhrp map 10.0.0.1 17.6.0.2
+ip nhrp nhs 10.0.0.1
+
+! Configuración mGRE y Protección
+tunnel source e0/0
+tunnel mode gre multipoint
+tunnel key 2000
+tunnel protection ipsec profile VPN-PROFILE
+
+! Optimización de MTU/MSS
+ip mtu 1400
+ip tcp adjust-mss 1360
+exit
+
+!
+! ENLACES ADICIONALES SEGUN TOPOLOGIA
+! LOS DEJAMOS ACTIVOS COMO RESERVA
+!
+interface e0/2
+description ENLACE-SECUNDARIO-SW-SUPERIOR
+no shutdown
+
+interface e0/3
+description ENLACE-HACIA-SW-INFERIOR
+no shutdown
+
+interface e1/0
+description ENLACE-SECUNDARIO-SW-INFERIOR
+no shutdown
+
+!
+! DHCP DESDE EL ROUTER
+!
+ip dhcp excluded-address 172.24.0.1 172.24.0.2
+ip dhcp excluded-address 172.24.0.9 172.24.0.10
+ip dhcp excluded-address 172.24.0.17 172.24.0.18
+ip dhcp excluded-address 172.24.0.25 172.24.0.27
+
+ip dhcp pool BARAHONA_DEPTO1
+network 172.24.0.0 255.255.255.248
+default-router 172.24.0.1
+dns-server 172.18.0.66
+domain-name empresa2.com.do
+
+ip dhcp pool BARAHONA_DEPTO2
+network 172.24.0.8 255.255.255.248
+default-router 172.24.0.9
+dns-server 172.18.0.66
+domain-name empresa2.com.do
+
+ip dhcp pool BARAHONA_DEPTO3
+network 172.24.0.16 255.255.255.248
+default-router 172.24.0.17
+dns-server 172.18.0.66
+domain-name empresa2.com.do
+
+router ospf 1
+router-id 5.5.5.1
+network 172.24.0.0 0.1.255.255 area 5
+network 10.0.0.0 0.0.0.255 area 0
+exit
+
+interface Tunnel0
+ip ospf network broadcast
+! Prioridad 0 para que NUNCA intente ser DR o BDR
+ip ospf priority 0
+exit
+
+end
+write memory
+————————————————————————————————
+2) Switch superior — R5-SWA1
+
+Asignación de puertos
+e0/0 y e0/1 → hacia router
+e0/2 y e0/3 → hacia switch inferior
+e1/0 → Win67
+e1/1 → Win68
+e1/2 → Win69
+
+enable
+configure terminal
+hostname R5-SWA1
+no ip domain-lookup
+ip domain-name empresa2.com.do
+service password-encryption
+enable secret cisco123
+
+username admin privilege 15 secret Admin123
+
+crypto key generate rsa modulus 1024
+ip ssh version 2
+
+line console 0
+logging synchronous
+password cisco
+login
+exit
+
+line vty 0 4
+transport input ssh
+login local
+exit
+
+spanning-tree mode rapid-pvst
+spanning-tree vlan 10,20,30,99 root primary
+spanning-tree portfast default
+spanning-tree bpduguard default
+
+vlan 10
+name DEPTO1
+vlan 20
+name DEPTO2
+vlan 30
+name DEPTO3
+vlan 99
+name GESTION
+
+!
+! TRONCALES
+!
+interface range e0/0 - 3
+description TRONCALES
+switchport trunk encapsulation dot1q
+switchport mode trunk
+switchport trunk allowed vlan 10,20,30,99
+ip dhcp snooping trust
+ip arp inspection trust
+
+!
+! USUARIOS
+!
+interface e1/0
+description WIN67-VLAN10
+switchport mode access
+switchport access vlan 10
+switchport port-security
+switchport port-security maximum 2
+switchport port-security mac-address sticky
+switchport port-security violation restrict
+spanning-tree portfast
+spanning-tree bpduguard enable
+
+interface e1/1
+description WIN68-VLAN10
+switchport mode access
+switchport access vlan 10
+switchport port-security
+switchport port-security maximum 2
+switchport port-security mac-address sticky
+switchport port-security violation restrict
+spanning-tree portfast
+spanning-tree bpduguard enable
+
+interface e1/2
+description WIN69-VLAN20
+switchport mode access
+switchport access vlan 20
+switchport port-security
+switchport port-security maximum 2
+switchport port-security mac-address sticky
+switchport port-security violation restrict
+spanning-tree portfast
+spanning-tree bpduguard enable
+
+!
+! VLAN DE GESTION
+!
+interface vlan 99
+ip address 172.24.0.26 255.255.255.248
+no shutdown
+
+ip default-gateway 172.24.0.25
+
+!
+! SEGURIDAD
+!
+ip dhcp snooping
+ip dhcp snooping vlan 10,20,30,99
+no ip dhcp snooping information option
+ip arp inspection vlan 10,20,30
+
+end
+write memory
+————————————————————————————————
+3) Switch inferior — R5-SWA2
+Asignación de puertos según tu imagen
+e0/0 y e0/1 → hacia router
+e0/2 y e0/3 → hacia switch superior
+e1/0 → Win72
+e1/1 → Win70
+e1/2 → Win71
+
+enable
+configure terminal
+hostname R5-SWA2
+no ip domain-lookup
+ip domain-name empresa2.com.do
+service password-encryption
+enable secret cisco123
+
+username admin privilege 15 secret Admin123
+
+crypto key generate rsa modulus 1024
+ip ssh version 2
+
+line console 0
+logging synchronous
+password cisco
+login
+exit
+
+line vty 0 4
+transport input ssh
+login local
+exit
+
+spanning-tree mode rapid-pvst
+spanning-tree vlan 10,20,30,99 root secondary
+spanning-tree portfast default
+spanning-tree bpduguard default
+
+vlan 10
+name DEPTO1
+vlan 20
+name DEPTO2
+vlan 30
+name DEPTO3
+vlan 99
+name GESTION
+
+!
+! TRONCALES
+!
+interface range e0/0 - 3
+description TRONCALES
+switchport trunk encapsulation dot1q
+switchport mode trunk
+switchport trunk allowed vlan 10,20,30,99
+ip dhcp snooping trust
+ip arp inspection trust
+
+!
+! USUARIOS
+!
+interface e1/0
+description WIN72-VLAN30
+switchport mode access
+switchport access vlan 30
+switchport port-security
+switchport port-security maximum 2
+switchport port-security mac-address sticky
+switchport port-security violation restrict
+spanning-tree portfast
+spanning-tree bpduguard enable
+
+interface e1/1
+description WIN70-VLAN20
+switchport mode access
+switchport access vlan 20
+switchport port-security
+switchport port-security maximum 2
+switchport port-security mac-address sticky
+switchport port-security violation restrict
+spanning-tree portfast
+spanning-tree bpduguard enable
+
+interface e1/2
+description WIN71-VLAN30
+switchport mode access
+switchport access vlan 30
+switchport port-security
+switchport port-security maximum 2
+switchport port-security mac-address sticky
+switchport port-security violation restrict
+spanning-tree portfast
+spanning-tree bpduguard enable
+
+!
+! VLAN DE GESTION
+!
+interface vlan 99
+ip address 172.24.0.27 255.255.255.248
+no shutdown
+
+ip default-gateway 172.24.0.25
+
+!
+! SEGURIDAD
+!
+ip dhcp snooping
+ip dhcp snooping vlan 10,20,30,99
+no ip dhcp snooping information option
+ip arp inspection vlan 10,20,30
+
+end
+write memory
+————————————————————————————————
+4) IP automática para las PCs
+
+en DHCP.
+
+Deben recibir así:
+
+VLAN 10 → red 172.24.0.0/29
+VLAN 20 → red 172.24.0.8/29
+VLAN 30 → red 172.24.0.16/29
+
+Recordemos tener en cuenta los comandos de verificacion
+
+show ip interface brief
+show ip dhcp binding
+show vlan brief
+show interfaces trunk
+show spanning-tree
