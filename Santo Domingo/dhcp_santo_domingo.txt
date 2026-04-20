@@ -1,0 +1,312 @@
+================================================================================
+        DOCUMENTACION COMPLETA - SERVIDOR DHCP EN UBUNTU MATE
+                              PROVINCIA: SANTO DOMINGO
+================================================================================
+
+================================================================================
+TABLA DE VLANs - SANTO DOMINGO
+================================================================================
+IP del Servidor DHCP: 172.16.50.5/24
+
+Departamento      VLAN   Red              Mascara (/Prefijo)            Gateway
+--------------------------------------------------------------------------------
+Ventas            10     172.16.1.0       255.255.255.0   (/24)         172.16.1.1
+Gestion           20     172.16.2.0       255.255.255.128 (/25)         172.16.2.1
+Administracion    30     172.16.2.128     255.255.255.128 (/25)         172.16.2.129
+Recursos_humanos  40     172.16.3.0       255.255.255.128 (/25)         172.16.3.1
+Servidores (LAN)  50     172.16.50.0      255.255.255.0   (/24)         172.16.50.1
+
+================================================================================
+PASO 1 - INSTALACION DEL SERVIDOR DHCP
+================================================================================
+
+sudo apt update
+sudo apt install isc-dhcp-server -y
+
+================================================================================
+PASO 2 - CONFIGURAR INTERFACES (/etc/default/isc-dhcp-server)
+================================================================================
+
+sudo nano /etc/default/isc-dhcp-server
+
+# Contenido:
+INTERFACESv4="ens3.10 ens3.20 ens3.30 ens3.40 ens3.50"
+INTERFACESv6=""
+
+NOTA: No agregar espacios extra ni puntos al final. Separar con un solo espacio.
+
+================================================================================
+PASO 3 - CONFIGURACION dhcpd.conf
+================================================================================
+
+sudo nano /etc/dhcp/dhcpd.conf
+
+default-lease-time 600;
+max-lease-time 7200;
+authoritative;
+
+## VLAN 10 - Ventas (/24)
+subnet 172.16.1.0 netmask 255.255.255.0 {
+    range 172.16.1.10 172.16.1.200;
+    option routers 172.16.1.1;
+    option subnet-mask 255.255.255.0;
+    option domain-name-servers 8.8.8.8, 8.8.4.4;
+    option broadcast-address 172.16.1.255;
+}
+
+## VLAN 20 - Gestion (/25)
+subnet 172.16.2.0 netmask 255.255.255.128 {
+    range 172.16.2.10 172.16.2.120;
+    option routers 172.16.2.1;
+    option subnet-mask 255.255.255.128;
+    option domain-name-servers 8.8.8.8, 8.8.4.4;
+    option broadcast-address 172.16.2.127;
+}
+
+## VLAN 30 - Administracion (/25)
+subnet 172.16.2.128 netmask 255.255.255.128 {
+    range 172.16.2.140 172.16.2.250;
+    option routers 172.16.2.129;
+    option subnet-mask 255.255.255.128;
+    option domain-name-servers 8.8.8.8, 8.8.4.4;
+    option broadcast-address 172.16.2.255;
+}
+
+## VLAN 40 - Recursos Humanos (/25)
+subnet 172.16.3.0 netmask 255.255.255.128 {
+    range 172.16.3.10 172.16.3.120;
+    option routers 172.16.3.1;
+    option subnet-mask 255.255.255.128;
+    option domain-name-servers 8.8.8.8, 8.8.4.4;
+    option broadcast-address 172.16.3.127;
+}
+
+## VLAN 50 - Servidores LAN (/24)
+subnet 172.16.50.0 netmask 255.255.255.0 {
+    range 172.16.50.6 172.16.50.30;
+    option routers 172.16.50.1;
+    option subnet-mask 255.255.255.0;
+    option domain-name-servers 8.8.8.8, 8.8.4.4;
+    option broadcast-address 172.16.50.255;
+}
+
+ERRORES COMUNES EN dhcpd.conf:
+- Olvidar el punto y coma (;) al final de cada linea.
+- El broadcast-address debe corresponder exactamente a la subred.
+- El range no puede contener IPs fuera del bloque de subred declarado.
+
+================================================================================
+PASO 4 - CONFIGURAR SUBINTERFACES VLAN PERMANENTES (NETPLAN)
+================================================================================
+
+sudo nano /etc/netplan/01-network-manager-all.yaml
+
+# Contenido completo:
+
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    ens3:
+      dhcp4: no
+      addresses: [172.16.50.5/24]
+      gateway4: 172.16.50.1
+      nameservers:
+        addresses: [8.8.8.8, 8.8.4.4]
+  vlans:
+    ens3.10:
+      id: 10
+      link: ens3
+      addresses: [172.16.1.1/24]
+
+    ens3.20:
+      id: 20
+      link: ens3
+      addresses: [172.16.2.1/25]
+
+    ens3.30:
+      id: 30
+      link: ens3
+      addresses: [172.16.2.129/25]
+
+    ens3.40:
+      id: 40
+      link: ens3
+      addresses: [172.16.3.1/25]
+
+    ens3.50:
+      id: 50
+      link: ens3
+      addresses: [172.16.50.1/24]
+
+# Aplicar cambios:
+sudo netplan apply
+
+# Verificar IPs asignadas:
+ip addr show ens3.10
+ip addr show ens3.20
+ip addr show ens3.30
+ip addr show ens3.40
+ip addr show ens3.50
+
+NOTAS IMPORTANTES SOBRE NETPLAN:
+- Usar "renderer: networkd" (NO NetworkManager).
+- La interfaz fisica ens3 DEBE estar declarada en "ethernets" antes de "vlans".
+- Usar ESPACIOS para el indentado, nunca tabulaciones.
+- La IP de cada subinterfaz es la IP del gateway de esa VLAN.
+
+================================================================================
+PASO 5 - INICIAR Y HABILITAR EL SERVICIO
+================================================================================
+
+sudo systemctl start isc-dhcp-server
+sudo systemctl enable isc-dhcp-server
+sudo systemctl status isc-dhcp-server
+
+================================================================================
+PASO 6 - VALIDAR CONFIGURACION
+================================================================================
+
+# Validar sintaxis antes de reiniciar:
+sudo dhcpd -t
+
+# Reiniciar tras cambios:
+sudo systemctl restart isc-dhcp-server
+
+# Ver IPs asignadas:
+cat /var/lib/dhcp/dhcpd.leases
+
+# Ver logs detallados:
+sudo journalctl -u isc-dhcp-server --no-pager | tail -40
+
+================================================================================
+PASO 7 - CONFIGURACION DEL SWITCH CISCO
+================================================================================
+
+enable
+configure terminal
+
+# Crear VLANs:
+vlan 10
+ name Ventas
+vlan 20
+ name Gestion
+vlan 30
+ name Administracion
+vlan 40
+ name Recursos_Humanos
+vlan 50
+ name Servidores
+exit
+
+# Puerto del SERVIDOR - configurar como TRUNK:
+interface e0/1
+ switchport trunk encapsulation dot1q
+ switchport mode trunk
+exit
+
+# Puerto de cada PC - configurar como ACCESS (ajustar segun topologia):
+interface e0/3
+ switchport mode access
+ switchport access vlan 10
+ spanning-tree portfast
+exit
+
+# Verificar:
+show vlan brief
+show interfaces e0/1 trunk
+
+# Guardar:
+do wr
+
+================================================================================
+PASO 8 - CONFIGURACION DEL ROUTER (IP HELPER-ADDRESS)
+================================================================================
+
+CRITICO: Sin este paso las PCs en VLANs distintas a la del servidor
+NO obtendran IP por DHCP.
+
+interface g0/0.10
+ encapsulation dot1q 10
+ ip address 172.16.1.1 255.255.255.0
+ ip helper-address 172.16.50.5
+
+interface g0/0.20
+ encapsulation dot1q 20
+ ip address 172.16.2.1 255.255.255.128
+ ip helper-address 172.16.50.5
+
+interface g0/0.30
+ encapsulation dot1q 30
+ ip address 172.16.2.129 255.255.255.128
+ ip helper-address 172.16.50.5
+
+interface g0/0.40
+ encapsulation dot1q 40
+ ip address 172.16.3.1 255.255.255.128
+ ip helper-address 172.16.50.5
+
+interface g0/0.50
+ encapsulation dot1q 50
+ ip address 172.16.50.1 255.255.255.0
+ ip helper-address 172.16.50.5
+
+================================================================================
+ERRORES COMUNES Y SOLUCIONES
+================================================================================
+
+PROBLEMA: Servicio falla al iniciar
+SOLUCION: Ejecutar "sudo dhcpd -t" para ver el error exacto.
+          Causas comunes:
+          - Punto y coma faltante al final de una linea
+          - broadcast-address fuera del rango de la subred
+          - range con IPs fuera de la subred declarada
+
+PROBLEMA: Servicio inicia pero no escucha en todas las interfaces
+SOLUCION: Verificar que cada interfaz tenga IP asignada (ip addr show ens3.XX)
+          y que exista un bloque subnet correspondiente en dhcpd.conf.
+
+PROBLEMA: Subinterfaces sin IP despues de reiniciar
+SOLUCION: Verificar Netplan con "renderer: networkd" y ejecutar
+          "sudo netplan apply".
+
+PROBLEMA: PCs no toman IP aunque el servicio este corriendo
+SOLUCION 1: Ping entre PC y servidor para verificar conectividad.
+SOLUCION 2: Verificar configuracion del switch (VLANs, trunk, access).
+SOLUCION 3: Verificar que el router tenga "ip helper-address" configurado.
+SOLUCION 4: Si el switch tuvo configuraciones previas incorrectas,
+            hacer "write erase" y reconfigurar desde cero.
+
+PROBLEMA: Servidor sin internet despues de cambiar renderer
+SOLUCION: Agregar IP estatica, gateway y DNS en la seccion "ethernets"
+          de ens3 en el archivo Netplan.
+
+================================================================================
+REFERENCIA RAPIDA DE BROADCASTS POR PREFIJO
+================================================================================
+
+/24 = 256 IPs, broadcast en .255
+      Ej: 172.16.1.0/24   -> broadcast 172.16.1.255
+      Ej: 172.16.50.0/24  -> broadcast 172.16.50.255
+
+/25 = 128 IPs, broadcast en .127 o .255 (segun bloque)
+      Ej: 172.16.2.0/25   -> broadcast 172.16.2.127
+      Ej: 172.16.2.128/25 -> broadcast 172.16.2.255
+      Ej: 172.16.3.0/25   -> broadcast 172.16.3.127
+
+================================================================================
+COMANDOS UTILES DE REFERENCIA RAPIDA
+================================================================================
+
+sudo systemctl status isc-dhcp-server     # Ver estado
+sudo systemctl restart isc-dhcp-server    # Reiniciar servicio
+sudo dhcpd -t                             # Validar sintaxis
+cat /var/lib/dhcp/dhcpd.leases            # Ver IPs asignadas
+ip a                                      # Ver interfaces y sus IPs
+ip route                                  # Ver tabla de rutas
+sudo netplan apply                        # Aplicar cambios de Netplan
+sudo journalctl -u isc-dhcp-server --no-pager | tail -40  # Ver logs
+
+================================================================================
+FIN DE LA DOCUMENTACION - SANTO DOMINGO
+================================================================================
